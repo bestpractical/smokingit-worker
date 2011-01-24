@@ -1,0 +1,12 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use lib 'lib';
+use Smokingit::Worker;
+
+my $worker = Smokingit::Worker->new(
+    repo_path   => "repos",
+    job_servers => ['127.0.0.1:4730'],
+);
+$worker->run;
