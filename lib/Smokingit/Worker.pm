@@ -144,18 +144,22 @@ sub run_tests {
             $job->set_status(++$done,scalar(@tests));
         }
     );
-    my $aggregator = do {
+    my $aggregator = eval {
         # Runtests apparently grows PERL5LIB -- local it so it doesn't
         # grow without bound
         local $ENV{PERL5LIB} = $ENV{PERL5LIB};
         $harness->runtests(@tests);
     };
+    if (not $aggregator) {
+        $result->{error} = "Testing bailed out!\n\n$@",
+    } else {
+        # Tests were successful!  Shove back the frozen aggregator,
+        # stripping out the iterator coderefs first
+        $aggregator->{parser_for}{$_}{_iter} = undef
+            for keys %{$aggregator->{parser_for}};
+        $result->{aggregator} = $aggregator;
+    }
 
-    # Shove back the frozen aggregator, stripping out the iterator
-    # coderefs first
-    $aggregator->{parser_for}{$_}{_iter} = undef
-        for keys %{$aggregator->{parser_for}};
-    $result->{aggregator} = $aggregator;
     $self->client->do_task(post_results => freeze($result))
         or die "Can't send task!";
 
