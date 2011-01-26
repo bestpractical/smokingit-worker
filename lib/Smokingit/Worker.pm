@@ -88,6 +88,7 @@ sub run_tests {
     }
 
     # Check the SHA and check it out
+    warn "Now testing:\n";
     if (system("git", "rev-parse", "-q", "--verify", $sha)) {
         warn "No such SHA $sha in $project!\n";
         $result->{error} = "Can't find SHA";
@@ -95,6 +96,8 @@ sub run_tests {
         chdir("..");
         return undef;
     }
+    system("git", "clean", "-fxdq");
+    system("git", "reset", "--hard", "HEAD", "--quiet");
     system("git", "checkout", "-q", $sha);
 
     # Set up the environment
@@ -118,6 +121,7 @@ sub run_tests {
             $self->client->do_task(post_results => freeze($result));
 
             system("git", "clean", "-fxdq");
+            system("git", "reset", "--hard", "HEAD");
             chdir("..");
             return;
         }
@@ -156,6 +160,7 @@ sub run_tests {
 
     # Clean out
     system("git", "clean", "-fxdq");
+    system("git", "reset", "--hard", "HEAD");
     $_->clean for @cleaners;
     chdir("..");
 }
