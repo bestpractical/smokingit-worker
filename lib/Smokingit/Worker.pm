@@ -101,6 +101,10 @@ sub run_tests {
     system("git", "reset", "--hard", "HEAD", "--quiet");
     system("git", "checkout", "-q", $sha);
 
+    # Default perl-related environment vars
+    $ENV{PERL_MM_USE_DEFAULT}=1;
+    $ENV{PERL_AUTOINSTALL}="--alldeps";
+
     # Set up the environment
     for my $line (split /\n/, $env) {
         $line =~ s/\s*$//;
