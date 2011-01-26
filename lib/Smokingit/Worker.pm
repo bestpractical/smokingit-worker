@@ -12,6 +12,7 @@ use YAML;
 
 use Smokingit::Worker::Clean::TmpFiles;
 use Smokingit::Worker::Clean::Postgres;
+use Smokingit::Worker::Clean::Mysql;
 
 use fields qw(max_jobs repo_path client);
 
