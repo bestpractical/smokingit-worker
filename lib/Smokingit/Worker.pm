@@ -74,6 +74,8 @@ sub run_tests {
     my $jobs    = $request->{parallel} ? $self->max_jobs : 1;
     my $tests   = $request->{test_glob} || 't/*.t';
 
+    my $result = { smoke_id => $request->{smoke_id} };
+
     # Clone ourselves a copy if need be
     if (-d $project) {
         warn "Updating $project\n";
@@ -88,10 +90,7 @@ sub run_tests {
     # Check the SHA and check it out
     if (system("git", "rev-parse", "-q", "--verify", $sha)) {
         warn "No such SHA $sha in $project!\n";
-        my $result = {
-            smoke_id => $request->{smoke_id},
-            error    => "Can't find SHA",
-        };
+        $result->{error} = "Can't find SHA";
         $self->client->do_task(post_results => freeze($result));
         chdir("..");
         return undef;
@@ -114,11 +113,8 @@ sub run_tests {
         if ($ret) {
             my $exit_val = $ret >> 8;
             warn "Return value of $config from $project = $exit_val\n$output\n";
-            my $result = {
-                smoke_id => $request->{smoke_id},
-                error    => "Configuration failed (exit value $exit_val)!\n"
-                    . $output,
-            };
+            $result->{error} = "Configuration failed (exit value $exit_val)!\n\n"
+                . $output;
             $self->client->do_task(post_results => freeze($result));
 
             system("git", "clean", "-fxdq");
@@ -154,10 +150,7 @@ sub run_tests {
     # coderefs first
     $aggregator->{parser_for}{$_}{_iter} = undef
         for keys %{$aggregator->{parser_for}};
-    my $result = {
-        smoke_id   => $request->{smoke_id},
-        aggregator => $aggregator,
-    };
+    $result->{aggregator} = $aggregator;
     $self->client->do_task(post_results => freeze($result))
         or die "Can't send task!";
 
