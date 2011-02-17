@@ -88,15 +88,28 @@ sub run_tests {
         chdir($project);
     }
 
-    # Check the SHA and check it out
-    warn "Now testing:\n";
-    if (system("git", "rev-parse", "-q", "--verify", $sha)) {
-        warn "No such SHA $sha in $project!\n";
-        $result->{error} = "Can't find SHA";
-        $self->client->do_task(post_results => freeze($result));
+    # Set up initial state for cleaning purposes
+    my @cleaners = map {"Smokingit::Worker::Clean::$_"->new}
+        qw/TmpFiles Postgres Mysql/;
+    # Closures for cleanup and error handling
+    my $cleanup = sub {
+        system("git", "clean", "-fxdq");
+        system("git", "reset", "--hard", "HEAD");
+        $_->clean for @cleaners;
         chdir("..");
         return undef;
-    }
+    };
+    my $error = sub {
+        $result->{error} = shift;
+        warn $result->{error} . "\n";
+        $self->client->do_task(post_results => freeze($result));
+        $cleanup->();
+    };
+
+    # Check the SHA and check it out
+    warn "Now testing:\n";
+    !system("git", "rev-parse", "-q", "--verify", $sha)
+        or return $error->("Can't find SHA $sha in $project!");
     system("git", "clean", "-fxdq");
     system("git", "reset", "--hard", "HEAD", "--quiet");
     system("git", "checkout", "-q", $sha);
@@ -118,25 +131,13 @@ sub run_tests {
         $config =~ s/\s*;?\s*\n+/ && /g;
         my $output = `($config) 2>&1`;
         my $ret = $?;
-        if ($ret) {
-            my $exit_val = $ret >> 8;
-            warn "Return value of $config from $project = $exit_val\n$output\n";
-            $result->{error} = "Configuration failed (exit value $exit_val)!\n\n"
-                . $output;
-            $self->client->do_task(post_results => freeze($result));
-
-            system("git", "clean", "-fxdq");
-            system("git", "reset", "--hard", "HEAD");
-            chdir("..");
-            return;
-        }
+        my $exit_val = $ret >> 8;
+        return $error->("Configuration failed (exit value $exit_val)!\n\n" . $output)
+            if $ret;
     }
 
-    # Set up initial state for cleaning purposes
-    my @cleaners = map {"Smokingit::Worker::Clean::$_"->new}
-        qw/TmpFiles Postgres Mysql/;
 
-    # Run the tests
+    # Progress indicator via Gearman
     my $done = 0;
     my @tests = glob($tests);
     my $harness = TAP::Harness->new( {
@@ -148,30 +149,27 @@ sub run_tests {
             $job->set_status(++$done,scalar(@tests));
         }
     );
+
     my $aggregator = eval {
         # Runtests apparently grows PERL5LIB -- local it so it doesn't
         # grow without bound
         local $ENV{PERL5LIB} = $ENV{PERL5LIB};
         $harness->runtests(@tests);
-    };
-    if (not $aggregator) {
-        $result->{error} = "Testing bailed out!\n\n$@",
-    } else {
-        # Tests were successful!  Shove back the frozen aggregator,
-        # stripping out the iterator coderefs first
-        $aggregator->{parser_for}{$_}{_iter} = undef
-            for keys %{$aggregator->{parser_for}};
-        $result->{aggregator} = $aggregator;
-    }
+    } or return $error->("Testing bailed out!\n\n$@");
+
+    # Tests were successful!  Strip out the iterator coderefs so
+    # we can serialize the aggregator, for ease of stats
+    # extraction
+    $aggregator->{parser_for}{$_}{_iter} = undef
+        for keys %{$aggregator->{parser_for}};
+    $result->{aggregator} = $aggregator;
 
     $self->client->do_task(post_results => freeze($result))
         or die "Can't send task!";
 
     # Clean out
-    system("git", "clean", "-fxdq");
-    system("git", "reset", "--hard", "HEAD");
-    $_->clean for @cleaners;
-    chdir("..");
+    $cleanup->();
+    return 1;
 }
 
 1;
