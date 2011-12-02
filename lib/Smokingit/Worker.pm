@@ -7,7 +7,7 @@ use base 'Gearman::Worker';
 use TAP::Harness;
 
 use Gearman::Client;
-use Storable qw( freeze thaw );
+use Storable qw( nfreeze thaw );
 use YAML;
 
 use Smokingit::Worker::Clean::TmpFiles;
@@ -102,7 +102,7 @@ sub run_tests {
     my $error = sub {
         $result->{error} = shift;
         warn $result->{error} . "\n";
-        $self->client->do_task(post_results => freeze($result));
+        $self->client->do_task(post_results => nfreeze($result));
         $cleanup->();
     };
 
@@ -164,7 +164,7 @@ sub run_tests {
         for keys %{$aggregator->{parser_for}};
     $result->{aggregator} = $aggregator;
 
-    $self->client->do_task(post_results => freeze($result))
+    $self->client->do_task(post_results => nfreeze($result))
         or die "Can't send task!";
 
     # Clean out
