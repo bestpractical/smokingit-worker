@@ -4,9 +4,32 @@ use strict;
 use warnings;
 use lib 'lib';
 use Smokingit::Worker;
+use Getopt::Long;
+use Socket qw//;
+
+my $jobs    = 5;
+my $repos   = "repos";
+my $servers = ['127.0.0.1:4730'];
+
+GetOptions(
+    "jobs|j=i",                   \$jobs,
+    "repo-path|repos|r=s",        \$repos,
+    "gearman-server|server|s=s@", \$servers,
+) or die "Invalid options";
+
+die "Repository path $repos isn't writable!\n" unless -w $repos;
+
+for my $s (@{$servers}) {
+    my ($host, $port) = split ':', $s, 2;
+    $port ||= 4730;
+    my $packed = Socket::inet_aton($host);
+    die "Can't resolve server $host!\n" unless $packed;
+    $s = Socket::inet_ntoa($packed) . ":" . $port;
+}
 
 my $worker = Smokingit::Worker->new(
-    repo_path   => "repos",
-    job_servers => ['127.0.0.1:4730'],
+    max_jobs    => $jobs,
+    repo_path   => $repos,
+    job_servers => $servers,
 );
 $worker->run;
