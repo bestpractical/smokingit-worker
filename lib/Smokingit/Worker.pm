@@ -164,8 +164,9 @@ sub run_tests {
         for keys %{$aggregator->{parser_for}};
     $result->{aggregator} = $aggregator;
 
-    $self->client->do_task(post_results => nfreeze($result))
-        or die "Can't send task!";
+    $self->client->dispatch_background(
+        post_results => nfreeze($result)
+    );
 
     # Clean out
     $cleanup->();
