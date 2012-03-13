@@ -5,7 +5,7 @@ use warnings;
 use lib 'lib';
 use Smokingit::Worker;
 use Getopt::Long;
-use Socket qw//;
+use IO::Socket::INET;
 
 my $jobs    = 5;
 my $repos   = "repos";
@@ -22,9 +22,12 @@ die "Repository path $repos isn't writable!\n" unless -w $repos;
 for my $s (@{$servers}) {
     my ($host, $port) = split ':', $s, 2;
     $port ||= 4730;
-    my $packed = Socket::inet_aton($host);
-    die "Can't resolve server $host!\n" unless $packed;
-    $s = Socket::inet_ntoa($packed) . ":" . $port;
+
+    my $socket = IO::Socket::INET->new( PeerHost => "$host:$port" );
+    die "Connect to $s failed: $1\n"
+        if ($@ || "") =~ /^IO::Socket::INET: (.*)/;
+
+    $s = $socket->peerhost . ":" . $port;
 }
 
 my $worker = Smokingit::Worker->new(
