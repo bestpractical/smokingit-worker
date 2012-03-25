@@ -97,6 +97,7 @@ sub run_tests {
         system("git", "reset", "--hard", "HEAD");
         $_->clean for @cleaners;
         chdir("..");
+        %ENV = %ORIGINAL_ENV;
         return undef;
     };
     my $error = sub {
