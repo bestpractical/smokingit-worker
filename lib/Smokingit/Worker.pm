@@ -144,6 +144,7 @@ sub run_tests {
     my $harness = TAP::Harness->new( {
             jobs => $jobs,
             lib => [".", "lib"],
+            switches => "-w",
         } );
     $harness->callback(
         after_test => sub {
