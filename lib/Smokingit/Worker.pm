@@ -2,11 +2,9 @@ use strict;
 use warnings;
 
 package Smokingit::Worker;
-use base 'Gearman::Worker';
+use base 'AnyEvent::RabbitMQ::RPC';
 
 use TAP::Harness;
-
-use Gearman::Client;
 use Storable qw( nfreeze thaw );
 use YAML;
 
@@ -14,15 +12,16 @@ use Smokingit::Worker::Clean::TmpFiles;
 use Smokingit::Worker::Clean::Postgres;
 use Smokingit::Worker::Clean::Mysql;
 
-use fields qw(max_jobs repo_path client);
-
 sub new {
     my $class = shift;
     my %args = (
         max_jobs => 5,
+        serialize => 'Storable',
         @_,
     );
-    my $self = $class->SUPER::new(%args);
+    my $self = $class->SUPER::new(
+        %args,
+    );
     $self->{max_jobs} = $args{max_jobs};
     $self->{repo_path} = $args{repo_path};
     die "No valid repository path set!"
@@ -43,27 +42,21 @@ sub max_jobs {
     $self->{max_jobs} = shift || 1;
 }
 
-sub client {
-    my $self = shift;
-    return $self->{client};
-}
-
 sub run {
     my $self = shift;
     chdir($self->repo_path);
-    $self->register_function( run_tests => sub {$self->run_tests(@_)} );
-    $self->{client} = Gearman::Client->new(
-        job_servers => $self->job_servers,
+    $self->register(
+        name => "run_tests",
+        run  => sub {$self->run_tests(@_)},
     );
-    $self->work while 1;
+    AE::cv->recv;
 }
 
 my %projects;
 
 sub run_tests {
     my $self = shift;
-    my $job = shift;
-    my $request = @_ ? shift : thaw( $job->arg );
+    my $request = shift;
     my %ORIGINAL_ENV = %ENV;
 
     # Read data out of the hash they passed in
@@ -103,7 +96,10 @@ sub run_tests {
     my $error = sub {
         $result->{error} = shift;
         warn $result->{error} . "\n";
-        $self->client->do_task(post_results => nfreeze($result));
+        $self->call(
+            name => "post_results",
+            args => $result
+        );
         $cleanup->();
     };
 
@@ -148,10 +144,9 @@ sub run_tests {
         } );
     $harness->callback(
         after_test => sub {
-            $job->set_status(++$done,scalar(@tests));
+            ++$done; # No-op for now
         }
     );
-
     my $aggregator = eval {
         # Runtests apparently grows PERL5LIB -- local it so it doesn't
         # grow without bound
@@ -166,8 +161,9 @@ sub run_tests {
         for keys %{$aggregator->{parser_for}};
     $result->{aggregator} = $aggregator;
 
-    $self->client->dispatch_background(
-        post_results => nfreeze($result)
+    $self->call(
+        name => "post_results",
+        args => $result,
     );
 
     # Clean out
