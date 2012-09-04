@@ -2,11 +2,11 @@ use strict;
 use warnings;
 
 package Smokingit::Worker;
-use base 'Gearman::Worker';
+use base 'AnyEvent::RabbitMQ::RPC';
+
+use AnyMQ;
 
 use TAP::Harness;
-
-use Gearman::Client;
 use Storable qw( nfreeze thaw );
 use YAML;
 
@@ -14,21 +14,36 @@ use Smokingit::Worker::Clean::TmpFiles;
 use Smokingit::Worker::Clean::Postgres;
 use Smokingit::Worker::Clean::Mysql;
 
-use fields qw(max_jobs repo_path client);
-
 sub new {
     my $class = shift;
     my %args = (
         max_jobs => 5,
+        serialize => 'Storable',
         @_,
     );
-    my $self = $class->SUPER::new(%args);
+    my $pubsub = AnyMQ->new_with_traits(
+        exchange => 'events',
+        %args,
+        traits => ['AMQP'],
+    );
+    my $self = $class->SUPER::new(
+        connection => $pubsub->_rf,
+        %args,
+    );
+    $self->{pubsub} = $pubsub;
     $self->{max_jobs} = $args{max_jobs};
     $self->{repo_path} = $args{repo_path};
     die "No valid repository path set!"
         unless $args{repo_path} and -d $args{repo_path};
 
     return $self;
+}
+
+sub publish {
+    my $self = shift;
+    my (%msg) = @_;
+    $msg{type} = "worker_progress";
+    $self->{pubsub}->topic($msg{type})->publish(\%msg);
 }
 
 sub repo_path {
@@ -43,28 +58,27 @@ sub max_jobs {
     $self->{max_jobs} = shift || 1;
 }
 
-sub client {
-    my $self = shift;
-    return $self->{client};
-}
-
 sub run {
     my $self = shift;
     chdir($self->repo_path);
-    $self->register_function( run_tests => sub {$self->run_tests(@_)} );
-    $self->{client} = Gearman::Client->new(
-        job_servers => $self->job_servers,
+    $self->register(
+        name => "run_tests",
+        run  => sub {$self->run_tests(@_)},
     );
-    $self->work while 1;
+    AE::cv->recv;
 }
 
 my %projects;
 
 sub run_tests {
     my $self = shift;
-    my $job = shift;
-    my $request = @_ ? shift : thaw( $job->arg );
+    my $request = shift;
     my %ORIGINAL_ENV = %ENV;
+
+    $self->publish(
+        smoke_id => $request->{smoke_id},
+        status   => "started",
+    );
 
     # Read data out of the hash they passed in
     my $project = $request->{project};
@@ -103,7 +117,10 @@ sub run_tests {
     my $error = sub {
         $result->{error} = shift;
         warn $result->{error} . "\n";
-        $self->client->do_task(post_results => nfreeze($result));
+        $self->call(
+            name => "post_results",
+            args => $result
+        );
         $cleanup->();
     };
 
@@ -129,6 +146,10 @@ sub run_tests {
 
     # Run configure
     if ($config =~ /\S/) {
+        $self->publish(
+            smoke_id => $request->{smoke_id},
+            status   => "configuring",
+        );
         $config =~ s/\s*;?\s*\n+/ && /g;
         my $output = `($config) 2>&1`;
         my $ret = $?;
@@ -146,12 +167,23 @@ sub run_tests {
             lib => [".", "lib"],
             switches => "-w",
         } );
+
+    $self->publish(
+        smoke_id => $request->{smoke_id},
+        status   => "testing",
+        complete => $done,
+        total    => scalar(@tests),
+    );
     $harness->callback(
         after_test => sub {
-            $job->set_status(++$done,scalar(@tests));
+            $self->publish(
+                smoke_id => $request->{smoke_id},
+                status   => "testing",
+                complete => ++$done,
+                total    => scalar(@tests),
+            );
         }
     );
-
     my $aggregator = eval {
         # Runtests apparently grows PERL5LIB -- local it so it doesn't
         # grow without bound
@@ -166,8 +198,9 @@ sub run_tests {
         for keys %{$aggregator->{parser_for}};
     $result->{aggregator} = $aggregator;
 
-    $self->client->dispatch_background(
-        post_results => nfreeze($result)
+    $self->call(
+        name => "post_results",
+        args => $result,
     );
 
     # Clean out

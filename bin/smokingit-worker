@@ -5,34 +5,35 @@ use warnings;
 use lib 'lib';
 use Smokingit::Worker;
 use Getopt::Long;
-use IO::Socket::INET;
 
 my $jobs    = 5;
 my $repos   = "repos";
-my $servers = ['127.0.0.1:4730'];
+
+my $host    = "localhost";
+my $port    = 5672;
+my $user    = "guest";
+my $pass    = "guest";
+my $vhost   = "/";
 
 GetOptions(
     "jobs|j=i",                   \$jobs,
     "repo-path|repos|r=s",        \$repos,
-    "gearman-server|server|s=s@", \$servers,
+    "host|h=s",                   \$host,
+    "port|p=i",                   \$port,
+    "user|U=s",                   \$user,
+    "password|pass|P=s",          \$pass,
 ) or die "Invalid options";
 
 die "Repository path $repos isn't writable!\n" unless -w $repos;
 
-for my $s (@{$servers}) {
-    my ($host, $port) = split ':', $s, 2;
-    $port ||= 4730;
-
-    my $socket = IO::Socket::INET->new( PeerHost => "$host:$port" );
-    die "Connect to $s failed: $1\n"
-        if ($@ || "") =~ /^IO::Socket::INET: (.*)/;
-
-    $s = $socket->peerhost . ":" . $port;
-}
-
 my $worker = Smokingit::Worker->new(
     max_jobs    => $jobs,
     repo_path   => $repos,
-    job_servers => $servers,
+
+    host        => $host,
+    port        => $port,
+    user        => $user,
+    pass        => $pass,
+    vhost       => $vhost,
 );
 $worker->run;
