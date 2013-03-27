@@ -21,7 +21,7 @@ sub list_dbs {
 sub list_users {
     my $self = shift;
     my $users = $self->dbh->selectcol_arrayref(
-        "select usename from postgres.pg_user");
+        "select usename from pg_user");
     return @$users;
 }
 
