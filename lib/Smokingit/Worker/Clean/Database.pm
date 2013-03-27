@@ -18,6 +18,7 @@ sub new {
     my $self = $class->SUPER::new();
     $self->{$_} = $args{$_} for qw/user password/;
     $self->{dbs}{$_}++ for $self->list_dbs;
+    $self->{users}{$_}++ for $self->list_users;
     return $self;
 }
 
@@ -34,13 +35,22 @@ sub dbh {
 sub clean {
     my $self = shift;
     my @dbs = grep !$self->{dbs}{ $_ }, $self->list_dbs;
-    return unless @dbs;
+    my @users = grep !$self->{users}{ $_ }, $self->list_users;
+    return unless @dbs or @users;
 
     warn "DROP DATABASE $_\n" for @dbs;
     $self->dbh->do("DROP DATABASE $_") for @dbs;
+
+    for (@users) {
+        my $sql = $self->clean_user_sql($_);
+        warn $sql;
+        $self->dbh->do($sql);
+    }
 }
 
 sub list_dbs { die "!!!\n" }
+sub list_users { die "!!!\n" }
+sub clean_user_sql { die "!!!\n" }
 
 1;
 

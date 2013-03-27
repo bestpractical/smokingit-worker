@@ -18,5 +18,16 @@ sub list_dbs {
     return map {s/.*dbname=([^;]+).*/$1/ ? $_ : () } grep defined, @dbs;
 }
 
+sub list_users {
+    my $self = shift;
+    my $users = $self->dbh->selectcol_arrayref(
+        "select usename from postgres.pg_user");
+    return @$users;
+}
+
+sub clean_user_sql {
+    "DROP ROLE $_[1]\n"
+}
+
 1;
 

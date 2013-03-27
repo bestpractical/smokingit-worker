@@ -20,5 +20,16 @@ sub list_dbs {
     return map {s/^DBI:mysql:(.*)/$1/ ? $_ : () } grep defined, @dbs;
 }
 
+sub list_users {
+    my $self = shift;
+    my $users = $self->dbh->selectcol_arrayref(
+        "SELECT concat(User,'\@',Host) FROM mysql.user");
+    return @$users;
+}
+
+sub clean_user_sql {
+    "DROP USER $_[1]\n"
+}
+
 1;
 
