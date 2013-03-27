@@ -21,19 +21,23 @@ sub new {
     return $self;
 }
 
-sub clean {
+sub dbh {
     my $self = shift;
-    my @dbs = grep !$self->{dbs}{ $_ }, $self->list_dbs;
-    return unless @dbs;
-
-    my $dbh = DBI->connect(
+    return $self->{dbh} ||= DBI->connect(
         $self->dsn,
         $self->{user},
         $self->{password},
         {RaiseError => 1}
     );
+}
+
+sub clean {
+    my $self = shift;
+    my @dbs = grep !$self->{dbs}{ $_ }, $self->list_dbs;
+    return unless @dbs;
+
     warn "DROP DATABASE $_\n" for @dbs;
-    $dbh->do("DROP DATABASE $_") for @dbs;
+    $self->dbh->do("DROP DATABASE $_") for @dbs;
 }
 
 sub list_dbs { die "!!!\n" }
