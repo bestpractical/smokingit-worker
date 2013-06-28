@@ -163,9 +163,10 @@ sub run_tests {
     my $done = 0;
     my @tests = glob($tests);
     my $harness = TAP::Harness->new( {
-            jobs => $jobs,
-            lib => [".", "lib"],
-            switches => "-w",
+            jobs       => $jobs,
+            lib        => [".", "lib"],
+            switches   => "-w",
+            diag_merge => 1,
         } );
 
     $self->publish(
