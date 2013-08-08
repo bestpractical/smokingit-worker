@@ -163,9 +163,10 @@ sub run_tests {
     my $done = 0;
     my @tests = glob($tests);
     my $harness = TAP::Harness->new( {
-            jobs => $jobs,
-            lib => [".", "lib"],
-            switches => "-w",
+            jobs       => $jobs,
+            lib        => [".", "lib"],
+            switches   => "-w",
+            diag_merge => 1,
         } );
 
     $self->publish(
@@ -176,6 +177,14 @@ sub run_tests {
     );
     $harness->callback(
         after_test => sub {
+            my ($job, $parser) = @_;
+            my $filename = $job->[0];
+            $result->{test}{$filename}{is_ok} = not $parser->has_problems;
+            $result->{test}{$filename}{tests_run} = $parser->tests_run;
+            $result->{test}{$filename}{elapsed}
+                = $parser->end_time - $parser->start_time;
+            $result->{start} ||= $parser->start_time;
+            $result->{end}     = $parser->end_time;
             $self->publish(
                 smoke_id => $request->{smoke_id},
                 status   => "testing",
@@ -184,19 +193,34 @@ sub run_tests {
             );
         }
     );
+    $harness->callback(
+        parser_args => sub {
+            my ($args, $job) = @_;
+            my $filename = $job->[0];
+            $result->{test}{$filename}{raw_tap} = "";
+            open($args->{spool}, ">", \$result->{test}{$filename}{raw_tap});
+        }
+    );
     my $aggregator = eval {
         # Runtests apparently grows PERL5LIB -- local it so it doesn't
         # grow without bound
         local $ENV{PERL5LIB} = $ENV{PERL5LIB};
         $harness->runtests(@tests);
     } or return $error->("Testing bailed out!\n\n$@");
-
-    # Tests were successful!  Strip out the iterator coderefs so
-    # we can serialize the aggregator, for ease of stats
-    # extraction
-    $aggregator->{parser_for}{$_}{_iter} = undef
-        for keys %{$aggregator->{parser_for}};
-    $result->{aggregator} = $aggregator;
+    $result->{is_ok} = not $aggregator->has_problems;
+    $result->{elapsed} = $result->{end} - $result->{start};
+    $result->{$_} = $aggregator->$_ for
+        qw/failed
+           parse_errors
+           passed
+           planned
+           skipped
+           todo
+           todo_passed
+           total
+           wait
+           exit
+          /;
 
     $self->call(
         name => "post_results",
