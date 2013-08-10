@@ -166,8 +166,8 @@ sub run_tests {
             jobs       => $jobs,
             lib        => [".", "lib"],
             switches   => "-w",
-            diag_merge => 1,
         } );
+    $harness->diag_merge(1) if $harness->can("diag_merge");
 
     $self->publish(
         smoke_id => $request->{smoke_id},
