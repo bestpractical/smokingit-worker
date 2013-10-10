@@ -185,12 +185,21 @@ sub run_tests {
                 = $parser->end_time - $parser->start_time;
             $result->{start} ||= $parser->start_time;
             $result->{end}     = $parser->end_time;
+            $self->call(
+                name => "post_file_results",
+                args => {
+                    filename => $filename,
+                    smoke_result_id => $request->{smoke_id},
+                    %{ $result->{test}{$filename} },
+                },
+            );
             $self->publish(
                 smoke_id => $request->{smoke_id},
                 status   => "testing",
                 complete => ++$done,
                 total    => scalar(@tests),
             );
+            return 1;
         }
     );
     $harness->callback(
