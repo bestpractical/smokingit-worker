@@ -6,6 +6,7 @@ use base 'AnyEvent::RabbitMQ::RPC';
 
 use AnyMQ;
 use Coro;
+use Coro::AnyEvent;
 
 use TAP::Harness;
 use Storable qw( nfreeze thaw );
@@ -45,6 +46,13 @@ sub publish {
     my (%msg) = @_;
     $msg{type} = "worker_progress";
     $self->{pubsub}->topic($msg{type})->publish(\%msg);
+    Coro::AnyEvent::poll;
+}
+
+sub call {
+    my $self = shift;
+    $self->SUPER::call(@_);
+    Coro::AnyEvent::poll;
 }
 
 sub repo_path {
@@ -216,6 +224,15 @@ sub run_tests {
             open($args->{spool}, ">", \$result->{test}{$filename}{raw_tap});
         }
     );
+    $harness->callback(
+        made_parser => sub {
+            my $parser = shift;
+            $parser->callback(
+                ALL => sub { Coro::AnyEvent::poll; }
+            );
+        }
+    );
+
     my $aggregator = eval {
         # Runtests apparently grows PERL5LIB -- local it so it doesn't
         # grow without bound
