@@ -5,6 +5,7 @@ package Smokingit::Worker;
 use base 'AnyEvent::RabbitMQ::RPC';
 
 use AnyMQ;
+use Coro;
 
 use TAP::Harness;
 use Storable qw( nfreeze thaw );
@@ -61,9 +62,12 @@ sub max_jobs {
 sub run {
     my $self = shift;
     chdir($self->repo_path);
-    $self->register(
+    $self->register_async(
         name => "run_tests",
-        run  => sub {$self->run_tests(@_)},
+        run  => sub {
+            my %args = @_;
+            async { $self->run_tests( %args ) };
+        },
     );
     AE::cv->recv;
 }
@@ -72,9 +76,10 @@ my %projects;
 
 sub run_tests {
     my $self = shift;
-    my $request = shift;
+    my %args = @_;
     my %ORIGINAL_ENV = %ENV;
 
+    my $request = $args{args};
     $self->publish(
         smoke_id => $request->{smoke_id},
         status   => "started",
@@ -122,6 +127,7 @@ sub run_tests {
             args => $result
         );
         $cleanup->();
+        $args{on_failure}->( $result->{error} );
     };
 
     # Check the SHA and check it out
@@ -238,7 +244,7 @@ sub run_tests {
 
     # Clean out
     $cleanup->();
-    return 1;
+    $args{on_success}->(1);
 }
 
 1;
