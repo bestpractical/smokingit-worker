@@ -154,6 +154,7 @@ sub run_tests {
     for my $line (split /\n/, $env) {
         $line =~ s/\s*$//;
         my ($var, $val) = split /\s*[:=\s]\s*/, $line, 2;
+        $val =~ s/$(\w+)/$ENV{$1}/g;
         warn "Setting $var=$val\n";
         $ENV{$var} = $val;
     }
