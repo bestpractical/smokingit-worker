@@ -106,14 +106,16 @@ sub run_tests {
     my $result = { smoke_id => $request->{smoke_id} };
 
     # Clone ourselves a copy if need be
+    $ENV{REPO_ROOT} = $self->repo_path . "/" . $project;
+
     if (-d $project) {
         warn "Updating $project\n";
-        chdir($project);
+        chdir($ENV{REPO_ROOT});
         system("git", "remote", "update");
     } else {
         warn "Cloning $project\n";
         system("git", "clone", "--quiet", $url, $project);
-        chdir($project);
+        chdir($ENV{REPO_ROOT});
     }
 
     # Set up initial state for cleaning purposes
