@@ -139,6 +139,7 @@ sub run_tests {
         );
         $cleanup->();
         $args{on_failure}->( $result->{error} );
+        Coro::AnyEvent::poll;
     };
 
     # Check the SHA and check it out
