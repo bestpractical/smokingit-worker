@@ -11,6 +11,7 @@ use Coro::AnyEvent;
 use TAP::Harness;
 use Storable qw( nfreeze thaw );
 use YAML;
+use Cwd qw();
 
 use Smokingit::Worker::Clean::TmpFiles;
 use Smokingit::Worker::Clean::Postgres;
@@ -34,7 +35,7 @@ sub new {
     );
     $self->{pubsub} = $pubsub;
     $self->{max_jobs} = $args{max_jobs};
-    $self->{repo_path} = $args{repo_path};
+    $self->{repo_path} = Cwd::realpath($args{repo_path});
     die "No valid repository path set!"
         unless $args{repo_path} and -d $args{repo_path};
 
@@ -123,7 +124,7 @@ sub run_tests {
         system("git", "clean", "-fxdq");
         system("git", "reset", "--hard", "HEAD");
         $_->clean for @cleaners;
-        chdir("..");
+        chdir( $self->repo_path );
         %ENV = %ORIGINAL_ENV;
         return undef;
     };
