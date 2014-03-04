@@ -9,6 +9,7 @@ use AnyEvent;
 use AnyMQ;
 
 use TAP::Harness;
+use TAP::Parser::Multiplexer::AnyEvent;
 use Storable qw( nfreeze thaw );
 use YAML;
 use Cwd qw();
