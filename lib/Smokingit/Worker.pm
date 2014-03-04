@@ -4,9 +4,9 @@ use warnings;
 package Smokingit::Worker;
 use base 'AnyEvent::RabbitMQ::RPC';
 
+use EV;
+use AnyEvent;
 use AnyMQ;
-use Coro;
-use Coro::AnyEvent;
 
 use TAP::Harness;
 use Storable qw( nfreeze thaw );
@@ -47,13 +47,6 @@ sub publish {
     my (%msg) = @_;
     $msg{type} = "worker_progress";
     $self->{pubsub}->topic($msg{type})->publish(\%msg);
-    Coro::AnyEvent::poll;
-}
-
-sub call {
-    my $self = shift;
-    $self->SUPER::call(@_);
-    Coro::AnyEvent::poll;
 }
 
 sub repo_path {
@@ -75,10 +68,10 @@ sub run {
         name => "run_tests",
         run  => sub {
             my %args = @_;
-            async { $self->run_tests( %args ) };
+            $self->run_tests( %args );
         },
     );
-    AE::cv->recv;
+    EV::loop;
 }
 
 my %projects;
@@ -139,7 +132,6 @@ sub run_tests {
         );
         $cleanup->();
         $args{on_failure}->( $result->{error} );
-        Coro::AnyEvent::poll;
     };
 
     # Check the SHA and check it out
@@ -185,6 +177,7 @@ sub run_tests {
             jobs       => $jobs,
             lib        => [".", "lib"],
             switches   => "-w",
+            multiplexer_class => 'TAP::Parser::Multiplexer::AnyEvent',
         } );
     $harness->diag_merge(1) if $harness->can("diag_merge");
 
@@ -227,14 +220,6 @@ sub run_tests {
             my $filename = $job->[0];
             $result->{test}{$filename}{raw_tap} = "";
             open($args->{spool}, ">", \$result->{test}{$filename}{raw_tap});
-        }
-    );
-    $harness->callback(
-        made_parser => sub {
-            my $parser = shift;
-            $parser->callback(
-                ALL => sub { Coro::AnyEvent::poll; }
-            );
         }
     );
 
