@@ -132,7 +132,7 @@ sub run_tests {
             args => $result
         );
         $cleanup->();
-        $args{on_failure}->( $result->{error} );
+        $args{on_success}->( $result->{error} );
     };
 
     # Check the SHA and check it out
