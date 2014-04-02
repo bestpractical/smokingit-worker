@@ -6,6 +6,7 @@ use base 'AnyEvent::RabbitMQ::RPC';
 
 use EV;
 use AnyEvent;
+use AnyEvent::Util;
 use AnyMQ;
 
 use TAP::Harness;
@@ -13,6 +14,7 @@ use TAP::Parser::Multiplexer::AnyEvent;
 use Storable qw( nfreeze thaw );
 use YAML;
 use Cwd qw();
+use File::Temp qw/ tempfile /;
 
 use Smokingit::Worker::Clean::TmpFiles;
 use Smokingit::Worker::Clean::Postgres;
@@ -162,9 +164,18 @@ sub run_tests {
             smoke_id => $request->{smoke_id},
             status   => "configuring",
         );
-        $config =~ s/\s*;?\s*\n+/ && /g;
-        my $output = `($config) 2>&1`;
-        my $ret = $?;
+        my ($fh, $filename) = tempfile();
+        $config =~ s/\r\n/\n/g;
+        $config = "#!/bin/sh\nset -e\nexec 2>&1\n$config\n";
+        print $fh $config;
+        close $fh;
+        chmod 0755, $filename;
+
+        my $output = "";
+        my $done = AnyEvent::Util::run_cmd $filename,
+            ">" => \$output;
+
+        my $ret = $done->recv;
         my $exit_val = $ret >> 8;
         return $error->("Configuration failed (exit value $exit_val)!\n\n" . $output)
             if $ret;
