@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use lib 'lib';
 use Smokingit::Worker;
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignore_case);
 
 my $jobs    = 5;
 my $repos   = "repos";
