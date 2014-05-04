@@ -99,6 +99,7 @@ sub run_tests {
     my $env     = $request->{env} || '';
     my $jobs    = $request->{parallel} ? $self->max_jobs : 1;
     my $tests   = $request->{test_glob} || 't/*.t';
+    my $prev    = $request->{previous};
 
     my $result = { smoke_id => $request->{smoke_id} };
 
@@ -182,10 +183,19 @@ sub run_tests {
             if $ret;
     }
 
+    # Figure out test order
+    my @tests = glob($tests);
+    if ($prev) {
+        # Put unknown tests first (alphabetically), followed by the
+        # rest, slowest to fastest.
+        @tests = sort { (defined($prev->{$a}) <=> defined($prev->{$b}))
+                     or (    ($prev->{$b}||0) <=> ($prev->{$a}||0)    )
+                     or (                  $a cmp $b                  )
+                    } @tests;
+    }
 
     # Progress indicator via Gearman
     my $done = 0;
-    my @tests = glob($tests);
     my $harness = TAP::Harness::AnyEvent->new( {
             jobs       => $jobs,
             lib        => [".", "lib"],
