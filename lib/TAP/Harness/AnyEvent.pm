@@ -138,10 +138,12 @@ sub aggregate_tests {
                 $self->finish_parser( $parser, $session );
                 $self->_after_test( $aggregate, $job, $parser );
                 $job->finish;
-                $all_done->end;
 
-                # And top the MUX back off again
+                # Top the MUX back off again -- before we complete this
+                # task, so we don't finish prematurely
                 $fill->();
+
+                $all_done->end;
             }
         }
     );
