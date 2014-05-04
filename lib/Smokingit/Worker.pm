@@ -10,6 +10,7 @@ use AnyEvent::Util;
 use AnyMQ;
 
 use TAP::Harness;
+use TAP::Harness::AnyEvent;
 use TAP::Parser::Multiplexer::AnyEvent;
 use Storable qw( nfreeze thaw );
 use YAML;
@@ -185,11 +186,10 @@ sub run_tests {
     # Progress indicator via Gearman
     my $done = 0;
     my @tests = glob($tests);
-    my $harness = TAP::Harness->new( {
+    my $harness = TAP::Harness::AnyEvent->new( {
             jobs       => $jobs,
             lib        => [".", "lib"],
             switches   => "-w",
-            multiplexer_class => 'TAP::Parser::Multiplexer::AnyEvent',
         } );
     $harness->diag_merge(1) if $harness->can("diag_merge");
 
@@ -216,14 +216,17 @@ sub run_tests {
                     smoke_result_id => $request->{smoke_id},
                     %{ $result->{test}{$filename} },
                 },
+                on_sent => sub {
+                    $self->publish(
+                        smoke_id => $request->{smoke_id},
+                        status   => "testing",
+                        complete => ++$done,
+                        total    => scalar(@tests),
+                    );
+                    return;
+                },
             );
-            $self->publish(
-                smoke_id => $request->{smoke_id},
-                status   => "testing",
-                complete => ++$done,
-                total    => scalar(@tests),
-            );
-            return 1;
+            return;
         }
     );
     $harness->callback(
@@ -235,35 +238,38 @@ sub run_tests {
         }
     );
 
-    my $aggregator = eval {
-        # Runtests apparently grows PERL5LIB -- local it so it doesn't
-        # grow without bound
-        local $ENV{PERL5LIB} = $ENV{PERL5LIB};
-        $harness->runtests(@tests);
-    } or return $error->("Testing bailed out!\n\n$@");
-    $result->{is_ok} = not $aggregator->has_problems;
-    $result->{elapsed} = $result->{end} - $result->{start};
-    $result->{$_} = $aggregator->$_ for
-        qw/failed
-           parse_errors
-           passed
-           planned
-           skipped
-           todo
-           todo_passed
-           total
-           wait
-           exit
-          /;
+    $harness->callback( after_runtests => sub {
+        my ($aggregator) = @_;
+        $result->{is_ok} = not $aggregator->has_problems;
+        $result->{elapsed} = $result->{end} - $result->{start};
+        $result->{$_} = $aggregator->$_ for
+            qw/failed
+               parse_errors
+               passed
+               planned
+               skipped
+               todo
+               todo_passed
+               total
+               wait
+               exit
+              /;
 
-    $self->call(
-        name => "post_results",
-        args => $result,
-    );
+        # Clean out
+        $cleanup->();
 
-    # Clean out
-    $cleanup->();
-    $args{on_success}->(1);
+        # And send the reply
+        $self->call(
+            name => "post_results",
+            args => $result,
+            on_reply => sub {
+                # Ensure the reply goes through before we ack everything
+                $args{on_success}->(1);
+            },
+        );
+    });
+
+    $harness->runtests(@tests);
 }
 
 1;

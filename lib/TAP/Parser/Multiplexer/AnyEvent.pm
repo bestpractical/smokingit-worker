@@ -25,26 +25,21 @@ $VERSION = '1.0';
 
     use TAP::Parser::Multiplexer::AnyEvent;
 
-    my $mux = TAP::Parser::Multiplexer->new;
+    my $mux = TAP::Parser::Multiplexer->new(
+        sub { ... }
+    );
     $mux->add( $parser1, $stash1 );
     $mux->add( $parser2, $stash2 );
-    while ( my ( $parser, $stash, $result ) = $mux->next ) {
-        # Will block waiting for input from the parsers, but still
-        # interact with other AnyEvent timers, etc
-    }
 
 =head1 DESCRIPTION
 
 L<TAP::Parser::Multiplexer> gathers input from multiple TAP::Parsers;
-this does so, but using AnyEvent as the main select loop.  A complete
-rewrite of L<TAP::Harness> to be event-driven is too complex, so this
-suffices to use the AnyEvent main loop for the main waiting-for-IO
-portion of testing.
+this does so, but using AnyEvent as the main select loop.  Results from
+the parsers will be passed to the subroutine.
 
-To use it, specify C<< multiplexer_class =>
-'TAP::Parser::Multiplexer::AnyEvent' >> to the L<TAP::Harness>
-constructor.  L<TAP::Harness/run_tests> will still block, but will be
-able to service AnyEvent events during its main loop.
+As it does not use the same C</next> interface as
+L<TAP::Parser::Multiplexer>, it is only usable by
+L<TAP::Harness::AnyEvent>.
 
 =head1 METHODS
 
@@ -52,9 +47,15 @@ able to service AnyEvent events during its main loop.
 
 =head3 C<new>
 
-    my $mux = TAP::Parser::Multiplexer::AnyEvent->new;
+    my $mux = TAP::Parser::Multiplexer::AnyEvent->new(
+        sub { ... }
+    );
 
-Returns a new C<TAP::Parser::Multiplexer::AnyEvent> object.
+Returns a new C<TAP::Parser::Multiplexer::AnyEvent> object.  The
+subroutine reference is a callback, which will be called for every
+result the multiplexer finds.  The subroutine will be called with three
+arguments -- the L<TAP::Parser> object, the stash from when the parser
+was added to the multiplexer, and the L<TAP::Parser::Result>.
 
 =cut
 
@@ -62,11 +63,7 @@ Returns a new C<TAP::Parser::Multiplexer::AnyEvent> object.
 
 sub _initialize {
     my $self = shift;
-    $self->{avid}    = [];                # Parsers that can't select
-    $self->{return}  = [];
-    $self->{handles} = [];
     $self->{count}   = 0;
-    $self->{ready}   = AnyEvent->condvar;
 
     # AnyEvent futzes with SIGCHLD.  We split the former _finish method
     # of TAP::Parser::Iterator::Process into two parts -- the exit-code
@@ -86,6 +83,8 @@ sub _initialize {
         }
     }
 
+    $self->{on_result} = shift;
+
     return $self;
 }
 
@@ -98,7 +97,7 @@ sub _initialize {
   $mux->add( $parser, $stash );
 
 Add a TAP::Parser to the multiplexer. C<$stash> is an optional opaque
-reference that will be returned from C<next> along with the parser and
+reference that will be passed to the callback, along with the parser and
 the next result.
 
 =cut
@@ -108,20 +107,34 @@ sub add {
 
     my @handles = $parser->get_select_handles;
     unless (@handles) {
-        push @{ $self->{avid} }, [ $parser, $stash ];
+        $self->{count}++;
+        # We don't want to parse it _now_, as we expect ->add() to be
+        # fast.  Rather, postpone it so we deal with it the next chance
+        # we hit the event loop.
+        AnyEvent::postpone {
+            while (1) {
+                my $result = $parser->next;
+                if ($result) {
+                    $self->{on_result}->( $parser, $stash, $result );
+                } else {
+                    $self->{count}--;
+                    $self->{on_result}->( $parser, $stash, undef );
+                    return;
+                }
+            }
+        };
         return;
     }
 
     my $it = $parser->_iterator;
     $it->{done} = AnyEvent->condvar;
     $it->{done}->begin( sub {
-        # Once _both_ exit code and reading-from-sockets is complete,
-        # push the undef that signals "this job is done" and kick the
-        # blocked ->recv in the iterator that reads the queue
+        # Once we have all of the exit code (below), parsing from
+        # sockets (below that), and closing of sockets (above), send the
+        # undef that signals this test is done.
         undef $it->{done};
-        push @{ $self->{return} }, [ $parser, $stash, undef ];
         $self->{count}--;
-        $self->{ready}->send;
+        $self->{on_result}->( $parser, $stash, undef );
     } );
 
     if ($parser->_iterator->{pid}) {
@@ -140,6 +153,7 @@ sub add {
     }
 
     for my $h (@handles) {
+        $it->{done}->begin;
         my $aeh; $aeh = AnyEvent->io(
             fh => $h,
             poll => "r",
@@ -147,16 +161,14 @@ sub add {
                 # If the filehandle has something to read, parse it
                 my $result = $parser->next;
                 if ($result) {
-                    # Not EOF?  Push onto the queue, and notify the
-                    # iterator that we just topped it off.
-                    push @{ $self->{return} },
-                        [ $parser, $stash, $result ];
-                    $self->{ready}->send;
+                    # Not EOF?  Return it.
+                    $self->{on_result}->( $parser, $stash, $result );
                 } else {
                     # If this is the end of the line, remove the
-                    # watcher.  We _don't_ push the "we're done" undef,
-                    # because we need the exit code first.
+                    # watcher.  Pushing the undef is done once all parts
+                    # of ->{done} are complete.
                     undef $aeh;
+                    $it->{done}->end;
                 }
             },
         );
@@ -175,75 +187,25 @@ when their input is exhausted.
 
 sub parsers {
     my $self = shift;
-    return $self->{count} + scalar @{ $self->{avid} };
+    return $self->{count};
 }
-
-sub _iter {
-    my $self = shift;
-
-    return sub {
-        # Drain all the non-selectable parsers first
-        if (@{ $self->{avid} } ) {
-            my ( $parser, $stash ) = @{ $self->{avid}->[0] };
-            my $result = $parser->next;
-            shift @{$self->{avid}} unless defined $result;
-            return ( $parser, $stash, $result );
-        }
-
-        # Block for the signal that we've got something to read
-        while (not @{ $self->{return} } and $self->{count} ) {
-            $self->{ready} = AnyEvent->condvar;
-            $self->{ready}->recv;
-        }
-
-        if (@{ $self->{return} }) {
-            my ($parser, $stash, $result) = @{ shift @{ $self->{return} } };
-            return ( $parser, $stash, $result );
-        }
-
-        return unless $self->{count};
-        die "No lines in the queue, but open handles?";
-    };
-}
-
 
 =head3 C<next>
 
-Return a result from the next available parser. Returns a list
-containing the parser from which the result came, the stash that
-corresponds with that parser and the result.
-
-    my ( $parser, $stash, $result ) = $mux->next;
-
-If C<$result> is undefined the corresponding parser has reached the end
-of its input (and will automatically be removed from the multiplexer).
-
-When all parsers are exhausted an empty list will be returned.
-
-    if ( my ( $parser, $stash, $result ) = $mux->next ) {
-        if ( ! defined $result ) {
-            # End of this parser
-        }
-        else {
-            # Process result
-        }
-    }
-    else {
-        # All parsers finished
-    }
+Exists to error if this classes is attempted to be used like a drop-in
+replacement for L<TAP::Parser::Multiplexer>.
 
 =cut
 
 sub next {
-    my $self = shift;
-    return ($self->{_iter} ||= $self->_iter)->();
+    die "TAP::Parser::Multiplexer::AnyEvent can only be used by TAP::Harness::AnyEvent";
 }
 
 =head1 See Also
 
-L<TAP::Parser>
+L<TAP::Harness::AnyEvent>
 
-L<TAP::Harness>
+L<TAP::Parser::Multiplexer>
 
 =cut
 
