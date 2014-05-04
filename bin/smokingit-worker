@@ -16,12 +16,13 @@ my $pass    = "guest";
 my $vhost   = "/";
 
 GetOptions(
-    "jobs|j=i",                   \$jobs,
-    "repo-path|repos|r=s",        \$repos,
-    "host|h=s",                   \$host,
-    "port|p=i",                   \$port,
-    "user|U=s",                   \$user,
-    "password|pass|P=s",          \$pass,
+    "jobs|j=i",            \$jobs,
+    "repo-path|repos|r=s", \$repos,
+    "host|h=s",            \$host,
+    "port|p=i",            \$port,
+    "user|U=s",            \$user,
+    "password|pass|P=s",   \$pass,
+    "vhost|v=s",           \$vhost,
 ) or die "Invalid options";
 
 die "Repository path $repos isn't writable!\n" unless -w $repos;
