@@ -124,6 +124,7 @@ sub run_tests {
         system("git", "clean", "-fxdq");
         system("git", "reset", "--hard", "HEAD");
         $_->clean for @cleaners;
+        @cleaners = ();
         chdir( $self->repo_path );
         %ENV = %ORIGINAL_ENV;
         return undef;
