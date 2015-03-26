@@ -6,7 +6,7 @@ use vars qw($VERSION @ISA);
 use AnyEvent;
 use AnyEvent::Util qw//;
 
-@ISA = 'TAP::Harness';
+use base 'TAP::Harness';
 
 =head1 NAME
 
