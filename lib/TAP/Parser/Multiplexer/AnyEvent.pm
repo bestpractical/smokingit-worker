@@ -65,19 +65,15 @@ sub _initialize {
     my $self = shift;
     $self->{count}   = 0;
 
-    # AnyEvent futzes with SIGCHLD.  We split the former _finish method
-    # of TAP::Parser::Iterator::Process into two parts -- the exit-code
-    # part, and the closing-sockets part.  The latter lies in _finish,
-    # the former is installed per-child using L<AnyEvent/child>.
+    # Instead of closing up shop as soon as the first EOF is hit, which
+    # is what ::Process does usually, trust the filehandle watchers
+    # below to do their own cleanup.  Once they are all closed and the
+    # process has exited, the standard _finish steps will be followed;
+    # see the call to ->begin( sub { ... } ), below.
     {
         no warnings 'redefine';
         require TAP::Parser::Iterator::Process;
-        *TAP::Parser::Iterator::Process::_finish = sub {
-            my $self = shift;
-            $self->{_next} = sub {return};
-            $self->{teardown}->() if $self->{teardown};
-            $self->{done}->end;
-        }
+        *TAP::Parser::Iterator::Process::_finish = sub {};
     }
 
     $self->{on_result} = shift;
@@ -126,10 +122,12 @@ sub add {
     my $it = $parser->_iterator;
     $it->{done} = AnyEvent->condvar;
     $it->{done}->begin( sub {
-        # Once we have all of the exit code (below), parsing from
-        # sockets (below that), and closing of sockets (above), send the
-        # undef that signals this test is done.
+        # Once we have all of the exit code (below), and all sockets are
+        # closed (below that), send the undef that signals this test is
+        # done.
         undef $it->{done};
+        $self->{_next} = sub {return};
+        $self->{teardown}->() if $self->{teardown};
         $self->{count}--;
         $self->{on_result}->( $parser, $stash, undef );
     } );
@@ -161,9 +159,9 @@ sub add {
                     # Not EOF?  Return it.
                     $self->{on_result}->( $parser, $stash, $result );
                 } else {
-                    # If this is the end of the line, remove the
-                    # watcher.  Pushing the undef is done once all parts
-                    # of ->{done} are complete.
+                    # If this is the end of the line, remove the watcher
+                    # and close the filehandle.  Pushing the undef is
+                    # done once all parts of ->{done} are complete.
                     undef $aeh;
                     $h->close;
                     $it->{done}->end;
@@ -171,6 +169,8 @@ sub add {
             },
         );
     }
+
+    $it->{done}->end;
     $self->{count}++;
 }
 
