@@ -75,9 +75,6 @@ sub _initialize {
         *TAP::Parser::Iterator::Process::_finish = sub {
             my $self = shift;
             $self->{_next} = sub {return};
-            ( delete $self->{out} )->close;
-            ( delete $self->{err} )->close if $self->{sel};
-            delete $self->{sel} if $self->{sel};
             $self->{teardown}->() if $self->{teardown};
             $self->{done}->end;
         }
@@ -168,6 +165,7 @@ sub add {
                     # watcher.  Pushing the undef is done once all parts
                     # of ->{done} are complete.
                     undef $aeh;
+                    $h->close;
                     $it->{done}->end;
                 }
             },
